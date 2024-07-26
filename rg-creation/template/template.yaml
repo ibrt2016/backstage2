@@ -1,0 +1,219 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: create-rg
+  title: Create a Resource Group And VNET
+  description: Create a Resource Group and VNET in Azure Subscription
+  tags:
+    - azure
+    - terraform
+spec:
+  owner: guests
+  type: service
+  parameters:
+    - title: Resource Group And VNET Creation
+      required:
+        - TicketID
+        - AzureSubscription
+        - ProjectStack
+        - Location
+        - Suffix
+        - Environment
+        - AddressSpace
+        - action
+      properties:
+        TicketID:
+          title: Zendesk ticket number
+          type: string
+          description: Zendesk Support ticket ID.
+          pattern: '^[0-9]+$'
+          ui:autofocus: true
+          ui:options:
+            rows: 5
+          ui:help: 'Hint: must be digits. eg: 12345 ...'
+      
+
+        ProjectStack:
+          title: Project stack
+          type: string
+          description: Name of the project stack.
+          ui:options:
+            rows: 5
+
+        AzureSubscription:
+          title: Target Azure Subscription
+          type: string
+          description: Taget Azure Subscription where the resouce will be deployed
+          enum:
+            - web
+            - infra
+            - analytics
+            - sbx
+          enumNames:
+            - 'Web'
+            - 'Infrastructure'
+            - 'Analytics'
+            - 'Sandbox'
+
+        Location:
+          title: Location
+          type: string
+          description: 'Location name where you want to create Resource Group and Virtual Network. eg: West Europe.'
+          default: eu-west
+          enum:
+            - eu-west
+            - ger-west-central
+            - eu-north
+            - jap-west
+            - us-east
+            - can-central
+          enumNames:
+            - 'West Europe'
+            - 'Germany West Central'
+            - 'North Europe'
+            - 'Japan West'
+            - 'East US'
+            - 'Canada Central'
+
+        Suffix:
+          title: Three digits suffix
+          type: string
+          description: Three digits suffix to append to the resource name
+          pattern: '^[0-9]+$'
+          ui:help: 'Hint: three digits. eg: 001, 002, 003 ...'
+        Environment:
+          title: Target environment
+          type: string
+          description: Taget environment to deploy into
+          enum:
+            - dev
+            - staging
+            - prod
+          enumNames:
+            - 'Development'
+            - 'Staging'
+            - 'Production'
+        AddressSpace:
+          title: IPv4 address space
+          type: string
+          description: The address space that is used by the virtual network
+          pattern: '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\/[0-9]{1,3}$'
+          ui:help: 'IPv4 address space range. eg: 10.0.0.0/16'
+
+        action:
+          title: Action
+          type: string
+          description: What action do you want to perform? Create or delete?
+          enum:
+            - apply
+            - destroy
+          enumNames:
+            - 'Apply'
+            - 'Destroy'
+      errorMessage:
+        properties:
+          TicketID: '1-8 alphanumeric tokens (first starts with letter) delimited by -'
+      
+    # - title: Choose a Repository Location
+    #   required:
+    #     - repoUrl
+    #   properties:
+    #     repoUrl:
+    #       title: Location of the repository
+    #       type: string
+    #       ui:field: RepoUrlPicker
+    #       ui:options:
+    #         allowedHosts:
+    #           - github.com
+    #       ui:help: 'terraform-azure-${{ parameters.AzureSubscription }}-${{ parameters.ProjectStack }}'
+  steps:
+    # Getting the all the files/details from the template
+    - id: fetch-base
+      name: Fetching Details from content folder
+      action: fetch:template
+      input:
+        url: ./content # Location of the content directory where catlog-info.yaml file is present for the template
+        values:
+          name: ${{ parameters.ProjectStack }}
+          env: ${{ parameters.Environment }}  #${{ inputs.debug && 'ON' || 'OFF' }}
+          region: ${{ parameters.Location }}
+          suffix: ${{ parameters.Suffix }}
+          address_space: ${{ parameters.AddressSpace }}
+
+    # Publish the content of the current working directory to our github directory
+    - id: publish
+      name: Publishing Details
+      action: publish:github
+      input:
+        allowedHosts: ["github.com"]
+        description: This repo is to create a Resource Group and a VNET with stack ${{ parameters.ProjectStack }} and suffix ${{ parameters.Suffix }} using backstage.
+        repoUrl: github.com?repo=terraform-azure-${{ parameters.AzureSubscription }}-${{ parameters.ProjectStack }}&owner=ibrt2016 #${{ parameters.repoUrl }}
+        repoVisibility: private # or 'internal' or 'public'
+        defaultBranch: main
+
+    - id: terraform_pr
+      name: Create terraform PR
+      action: publish:github:pull-request
+      input:
+        repoUrl: github.com?repo=terraform-azure-${{ parameters.AzureSubscription }}-${{ parameters.ProjectStack }}&owner=ibrt2016 #${{ parameters.repoUrl }}
+        branchName: "ticket-${{ parameters.TicketID }}"
+        targetBranchName: main # ${{ "main" if parameters.Environment == "prod" else parameters.Environment }}
+        title: "🔩 Create Azure resource group and VNET with project stack and suffix ."
+        description: |
+          ## Creating Resource Group with stack ${{ parameters.ProjectStack }} and suffix ${{ parameters.Suffix }}
+
+          This is an initial pull request to create an Azure Virtual Network and was created based on the Backstage template.
+
+          If you need to add more parameters, check the official documentation - https://registry.terraform.io/modules/terraform-aws-modules/sqs/aws/latest
+
+          *created by: [Backstage Software Template](https://hextech-portal.gdantas.com.br/create)* 👷‍♂️⚙️👷‍♀️
+        # sourcePath: ./templates/outputs
+        # targetPath: 'aws/production/sqs/${{ parameters.queue_name }}'
+        # here's where the secret can be used
+        token: ''
+
+    - id: label_pr
+      name: Add labels to PR
+      action: github:issues:label
+      input:
+        repoUrl: github.com?repo=terraform-azure-${{ parameters.AzureSubscription }}-${{ parameters.ProjectStack }}&owner=ibrt2016
+        number: "${{ steps.terraform_pr.output.pullRequestNumber }}"
+        labels:
+          - terraform
+          - azure
+          - created-by-backstage
+          - ${{ parameters.Environment }}
+          - rg
+          - vnet
+
+    # Triggering CI-CD to create resource in our case github action.
+    # - id: github-action
+    #   name: Starting GitHub action
+    #   action: github:actions:dispatch
+    #   input:
+    #     workflowId: terraform-build.yaml # Name of the github pipeline created into .github/workflows
+    #     repoUrl: "github.com?repo=terraform-cloud&owner=gittest20202" # Repo location where the github action build pipeline is created
+    #     branchOrTagName: "main"
+    #     workflowInputs:
+    #       ResourceGroupName: ${{ parameters.ResourceGroupName }}
+    #       Location: ${{ parameters.Location }}
+    #       VirtualNetworkName: ${{ parameters.VirtualNetworkName }}
+    #       action: ${{ parameters.action }}
+
+    # Registering new component in the catalog of backstage.
+    - id: register
+      name: Registering the new Component
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{steps['publish'].output.repoContentsUrl }}
+        catalogInfoPath: "/component-info.yaml" # where the info of the catalog is stored.
+
+  # Output links  are displayed to the user after the template execution.
+  output:
+    links:
+      - title: "👷‍♂️ Go to pull request 👷‍♂️"
+        url: ${{ steps.terraform_pr .output.remoteUrl }}
+        icon: github
+      - title: "To view more check documentation"
+        icon: docs
+        url: "https://registry.terraform.io/modules/terraform-aws-modules/sqs/aws/latest"
